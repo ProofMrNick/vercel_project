@@ -1,4 +1,6 @@
 
+// THIS FILE HAS BEEN REWRITTEN SPECIFICALLY TO SATISFY APP HOSTING CONDITIONS ON VERCEL.COM 
+
 var express = require('express');
 var app = express();
 
@@ -11,37 +13,27 @@ const path = require('path');
 const git = require("isomorphic-git");
 const http = require("isomorphic-git/http/node");
 
-const dir = path.join(process.cwd(), 'dbase');
+const dir = path.join('/tmp', 'dbase');
+const DB_PATH = path.join('/tmp', 'database.json');
 
 // add git and crypto
 async function syncToGitHub() {
   try {
-    await git.clone({ fs, http, dir, url: 'https://github.com/ProofMrNick/database.git' });
-
-    await git.pull({
-        fs,
-        http,
-        url: 'https://github.com/ProofMrNick/database.git',
-        dir: dir,
-        ref: 'main',
+    const dirExists = fs.existsSync(dir);
+    if (!dirExists) {
+      await git.clone({ fs, http, dir, url: 'https://github.com/ProofMrNick/database.git' });
+    } else {
+      await git.pull({
+        fs, http, url: 'https://github.com/ProofMrNick/database.git', dir: dir, ref: 'main',
         singleBranch: true,
-        author: {
-            email: 'server@authored',
-            name:  'server'
-        },
-    }).then(() => {
-        fs.readFile(dir + '/dbaseGIT.json', 'utf8', (err, data) => {
-        if (err) {
-          console.log(err);
-        } else {
-          fs.writeFile('./database.json', crypto.AES.decrypt(data, key).toString(crypto.enc.Utf8), err => {
-          if (err) {
-            console.log(err);
-          }
-         });
-        }
+        author: { email: 'server@authored', name: 'server' },
       });
-    });
+    }
+
+    const gitData = await fs.promises.readFile(path.join(dir, 'dbaseGIT.json'), 'utf8');
+    const decryptedData = crypto.AES.decrypt(gitData, key).toString(crypto.enc.Utf8);
+    await fs.promises.writeFile(DB_PATH, decryptedData);
+
   } catch(e) {
     console.error(e.stack);
   }
@@ -52,47 +44,38 @@ syncToGitHub();
 
 async function pushToGithub() {
   try {
-    await git.clone({ fs, http, dir, url: 'https://github.com/ProofMrNick/database.git' });
-
-    await git.pull({
-        fs,
-        http,
-        url: 'https://github.com/ProofMrNick/database.git',
-        dir: dir,
+    const dirExists = fs.existsSync(dir);
+    if (!dirExists) {
+      await git.clone({ fs, http, dir, url: 'https://github.com/ProofMrNick/database.git' });
+    } else {
+      await git.pull({
+        fs, 
+        http, 
+        url: 'https://github.com/ProofMrNick/database.git', 
+        dir: dir, 
         ref: 'main',
         singleBranch: true,
-        author: {
-            email: 'server@authored',
-            name:  'server'
-        },
-    });
+        author: { email: 'server@authored', name: 'server' },
+      });
+    }
 
-    fs.readFile('./database.json', 'utf8', (err, data) => {
-      if (err) {
-        console.log(err);
-      } else {
-        var encryptedData = crypto.AES.encrypt(data, key).toString();
-        fs.promises.writeFile(dir + '/dbaseGIT.json', encryptedData);
-      }
-    });
+    const data = await fs.promises.readFile(DB_PATH, 'utf8');
+    const encryptedData = crypto.AES.encrypt(data, key).toString();
+    await fs.promises.writeFile(path.join(dir, 'dbaseGIT.json'), encryptedData);
 
     await git.add({ fs, dir: dir, filepath: 'dbaseGIT.json' });
 
     await git.commit({
-      fs,
-      dir: dir,
-      author: {
-        email: 'server@authored',
-        name:  'server'
-      },
+      fs, dir: dir,
+      author: { email: 'server@authored', name: 'server' },
       message: 'Changed synced file to Node side file.'
     });
 
     await git.push({
-      fs,
-      http,
-      dir: dir,
-      remote: 'origin',
+      fs, 
+      http, 
+      dir: dir, 
+      remote: 'origin', 
       ref: 'main',
       onAuth: () => ({ username: process.env['TOKEN'], password: 'x-oauth-basic' }),
     });
@@ -109,15 +92,16 @@ async function pushToGithub() {
 
 // set the view engine to ejs
 app.set('view engine', 'ejs');
+app.set('views', path.join(process.cwd(), 'views'));
 
-app.use(express.static(__dirname + '/public'));
-app.use('/css', express.static(__dirname + '/public/css'));
-app.use('/js', express.static(__dirname + '/public/js'));
-app.use('/img', express.static(__dirname + '/public/img'));
+app.use(express.static(path.join(process.cwd(), 'public')));
+app.use('/css', express.static(path.join(process.cwd(), 'public/css')));
+app.use('/js', express.static(path.join(process.cwd(), 'public/js')));
+app.use('/img', express.static(path.join(process.cwd(), 'public/img')));
 
 
 var readData = new Promise(function(resolve, reject) {
-  fs.readFile('./database.json', 'utf8', (err, data) => {
+  fs.readFile(DB_PATH, 'utf8', (err, data) => {
     if (err) {
       reject(new Error(`Error reading file from disk: ${err}`))
     } else {
@@ -134,7 +118,7 @@ var writeData = function(dataToWrite) {
       if (!(key in data)) {
         data[key] = dataToWrite;
         data = JSON.stringify(data);
-        fs.writeFile('./database.json', data, 'utf8', err => {
+        fs.writeFile(DB_PATH, data, 'utf8', err => {
           if (err) {
             reject(new Error(`Error while writing to file: ${err}`));
           } else {
@@ -144,7 +128,7 @@ var writeData = function(dataToWrite) {
       } else {
         reject("user already exists")
       }
-    });
+    }).catch(reject);
   })
 } 
 
@@ -170,9 +154,10 @@ app.get('/preview', function(req, res) {
 
 
 app.get('/:user_email_id', function(req, res) {
-  fs.readFile('./database.json', 'utf8', (err, data) => {
+  fs.readFile(DB_PATH, 'utf8', (err, data) => {
     if (err) {
       console.log(err);
+      return res.status(500).send(err);
     } else {
       var dbase = JSON.parse(data);
       if (req.params.user_email_id in dbase) {
@@ -219,9 +204,10 @@ function lookup(data, source, dup) {
 
 
 app.get('/:user_email_id/:id/:dup', function(req, res) {
-  fs.readFile('./database.json', 'utf8', (err, data) => {
+  fs.readFile(DB_PATH, 'utf8', (err, data) => {
     if (err) {
       console.log(err);
+      return res.status(500).send(err);
   } else {
     var dbase = JSON.parse(data);
     if (req.params.user_email_id in dbase) {
@@ -246,9 +232,10 @@ app.get('/:user_email_id/:id/:dup', function(req, res) {
 });
 
 app.get('/:user_email_id/:id/:dup/workshop', function(req, res) {
-  fs.readFile('./database.json', 'utf8', (err, data) => {
+  fs.readFile(DB_PATH, 'utf8', (err, data) => {
     if (err) {
       console.log(err);
+      return res.status(500).send(err);
   } else {
     var dbase = JSON.parse(data);
     if (req.params.user_email_id in dbase) {
@@ -298,11 +285,11 @@ app.post("/api", function(req, res) {
       } else {
         res.json("failed to login")
       }
-    })
+    }).catch(() => res.json("failed to login"));
 
   } else if (req.body.do == "delete") {
 
-    fs.readFile('./database.json', 'utf8', (error, data1) => {
+    fs.readFile(DB_PATH, 'utf8', (error, data1) => {
       if (error) {
         res.json("failed to delete");
       } else {
@@ -310,7 +297,7 @@ app.post("/api", function(req, res) {
         var call = lookup(dbase[req.body.email_to_change].actions, req.body.id_to_change, req.body.dup_to_change);
         if (call[0] && call[1] !== undefined) {
           dbase[req.body.email_to_change].actions.splice(call[4], 1);
-          fs.writeFile('./database.json', JSON.stringify(dbase, null, 4), err => {
+          fs.writeFile(DB_PATH, JSON.stringify(dbase, null, 4), err => {
             if (err) {
               res.json("failed to delete");
             } else {
@@ -327,7 +314,7 @@ app.post("/api", function(req, res) {
 
   } else if (req.body.do == "update_action") {
 
-    fs.readFile('./database.json', 'utf8', (error, data1) => {
+    fs.readFile(DB_PATH, 'utf8', (error, data1) => {
       if (error) {
         res.json("failed to update action");
       } else {
@@ -347,7 +334,7 @@ app.post("/api", function(req, res) {
           }
           crrAct.id = req.body.prov_data.id;
           dbase[req.body.prov_data.author_email].actions[call[4]] = crrAct;
-          fs.writeFile('./database.json', JSON.stringify(dbase, null, 4), err => {
+          fs.writeFile(DB_PATH, JSON.stringify(dbase, null, 4), err => {
             if (err) {
               res.json("failed to update action");
             } else {
@@ -364,7 +351,7 @@ app.post("/api", function(req, res) {
 
   } else if (req.body.do == "create_action") {
 
-    fs.readFile('./database.json', 'utf8', (error, data1) => {
+    fs.readFile(DB_PATH, 'utf8', (error, data1) => {
       if (error) {
         res.json("failed to create action");
       } else {
@@ -376,7 +363,7 @@ app.post("/api", function(req, res) {
         }
         dbase[req.body.prov_data.author_email].actions
 .push(action);
-        fs.writeFile('./database.json', JSON.stringify(dbase, null, 4), err => {
+        fs.writeFile(DB_PATH, JSON.stringify(dbase, null, 4), err => {
           if (err) {
             res.json("failed to create action");
           } else {
@@ -390,13 +377,13 @@ app.post("/api", function(req, res) {
 
   } else if (req.body.do == "update_name") {
 
-    fs.readFile('./database.json', 'utf8', (error, data1) => {
+    fs.readFile(DB_PATH, 'utf8', (error, data1) => {
       if (error) {
         res.json("failed to update name");
       } else {
         var dbase = JSON.parse(data1);
         dbase[req.body.u_email].name = req.body.new_name;
-        fs.writeFile('./database.json', JSON.stringify(dbase, null, 4), err => {
+        fs.writeFile(DB_PATH, JSON.stringify(dbase, null, 4), err => {
           if (err) {
             res.json("failed to update name");
           } else {
@@ -410,7 +397,7 @@ app.post("/api", function(req, res) {
 
   } else if (req.body.do == "like") {
 
-    fs.readFile('./database.json', 'utf8', (error, data1) => {
+    fs.readFile(DB_PATH, 'utf8', (error, data1) => {
       if (error) {
         res.json("failed to like");
       } else {
@@ -431,7 +418,7 @@ app.post("/api", function(req, res) {
           }
           dbase[req.body.prov_data[1]].actions[call[4]].stats.likes = act_l;
           dbase[req.body.prov_data[1]].actions[call[4]].stats.downvotes = act_d;
-          fs.writeFile('./database.json', JSON.stringify(dbase, null, 4), err => {
+          fs.writeFile(DB_PATH, JSON.stringify(dbase, null, 4), err => {
             if (err) {
               res.json("failed to like");
             } else {
@@ -448,7 +435,7 @@ app.post("/api", function(req, res) {
 
   } else if (req.body.do == "downvote") {
 
-    fs.readFile('./database.json', 'utf8', (error, data1) => {
+    fs.readFile(DB_PATH, 'utf8', (error, data1) => {
       if (error) {
         res.json("failed to downvote");
       } else {
@@ -469,7 +456,7 @@ app.post("/api", function(req, res) {
           }
           dbase[req.body.prov_data[1]].actions[call[4]].stats.likes = act_l;
           dbase[req.body.prov_data[1]].actions[call[4]].stats.downvotes = act_d;
-          fs.writeFile('./database.json', JSON.stringify(dbase, null, 4), err => {
+          fs.writeFile(DB_PATH, JSON.stringify(dbase, null, 4), err => {
             if (err) {
               res.json("failed to downvote");
             } else {
@@ -486,66 +473,68 @@ app.post("/api", function(req, res) {
 
   } else if (req.body.do == "fetch_data") {
 
-    syncToGitHub();
-    fs.readFile('./database.json', 'utf8', (error, data1) => {
-    if (error) {
-      res.json("failed to fetch");
-    } else {
-      var fetched = [];
-      var data = JSON.parse(data1);
-      var keys = Object.keys(data);
+    syncToGitHub().then(() => {
+      fs.readFile(DB_PATH, 'utf8', (error, data1) => {
+      if (error) {
+        res.json("failed to fetch");
+      } else {
+        var fetched = [];
+        var data = JSON.parse(data1);
+        var keys = Object.keys(data);
 
-      for (var m = 0; m < keys.length; m++) {
-        for (var n = 0; n < data[keys[m]].actions.length; n++) {
-          if (data[keys[m]].actions[n].action_hidden == false) {
-            const currArt = structuredClone(data[keys[m]].actions[n]);
-            currArt.author_name = data[keys[m]].name;
-            currArt.role = data[keys[m]].role;
-            fetched.push(currArt);
+        for (var m = 0; m < keys.length; m++) {
+          for (var n = 0; n < data[keys[m]].actions.length; n++) {
+            if (data[keys[m]].actions[n].action_hidden == false) {
+              const currArt = structuredClone(data[keys[m]].actions[n]);
+              currArt.author_name = data[keys[m]].name;
+              currArt.role = data[keys[m]].role;
+              fetched.push(currArt);
+            }
           }
         }
+
+        fetched.sort((a, b) => {
+          let convertedDate = [];
+          let dateParts = a.fullToday.split(' ');
+          let date = dateParts[0].split('.');
+          let time = dateParts[1].split(':');
+
+          convertedDate.push(new Date(date[2], date[1] - 1, date[0], time[0], time[1], time[2]));
+
+          dateParts = b.fullToday.split(' ');
+          date = dateParts[0].split('.');
+          time = dateParts[1].split(':');
+
+          convertedDate.push(new Date(date[2], date[1] - 1, date[0], time[0], time[1], time[2]));
+
+          return convertedDate[1] - convertedDate[0]
+        });
+
+        var perPage = 4;
+
+        var pinned = fetched.filter((action) => action.pinned);
+        var regular = fetched.filter((action) => !action.pinned);
+
+        var ready_to_send = regular.slice( Number(0 + (perPage * (Number(req.body.prov_data) - 1))), Number(perPage + (perPage * (Number(req.body.prov_data) - 1))) );
+        pinned.forEach((action) => { ready_to_send.push(action) });
+
+        var sliceFurther = regular.slice( Number(perPage + (perPage * (Number(req.body.prov_data) - 1))) ).length > 0;
+        ready_to_send = [sliceFurther, ready_to_send];
+
+        console.log(ready_to_send);
+        res.json(ready_to_send);
+
       }
-
-      fetched.sort((a, b) => {
-        let convertedDate = [];
-        let dateParts = a.fullToday.split(' ');
-        let date = dateParts[0].split('.');
-        let time = dateParts[1].split(':');
-
-        convertedDate.push(new Date(date[2], date[1] - 1, date[0], time[0], time[1], time[2]));
-
-        dateParts = b.fullToday.split(' ');
-        date = dateParts[0].split('.');
-        time = dateParts[1].split(':');
-
-        convertedDate.push(new Date(date[2], date[1] - 1, date[0], time[0], time[1], time[2]));
-
-        return convertedDate[1] - convertedDate[0]
       });
-
-      var perPage = 4;
-
-      var pinned = fetched.filter((action) => action.pinned);
-      var regular = fetched.filter((action) => !action.pinned);
-
-      var ready_to_send = regular.slice( Number(0 + (perPage * (Number(req.body.prov_data) - 1))), Number(perPage + (perPage * (Number(req.body.prov_data) - 1))) );
-      pinned.forEach((action) => { ready_to_send.push(action) });
-
-      var sliceFurther = regular.slice( Number(perPage + (perPage * (Number(req.body.prov_data) - 1))) ).length > 0;
-      ready_to_send = [sliceFurther, ready_to_send];
-
-      console.log(ready_to_send);
-      res.json(ready_to_send);
-
-    }
     });
-
   }
 });
 
 
 
 
+// no "app.listen(..)" because i'm hosting on Vercel and it requires this line
+module.exports = app;
 
-app.listen(8080);
-console.log('Server is listening on port 8080');
+
+
